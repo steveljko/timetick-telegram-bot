@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"strconv"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
@@ -10,6 +11,7 @@ import (
 type Bot struct {
 	api             *tgbotapi.BotAPI
 	authorizedUsers map[int64]bool
+	db              *Database
 }
 
 type Sender struct {
@@ -17,7 +19,7 @@ type Sender struct {
 	Username string
 }
 
-func NewTelegramBot(token string, users []int64) (*Bot, error) {
+func NewTelegramBot(token string, users []int64, db *Database) (*Bot, error) {
 	api, err := tgbotapi.NewBotAPI(token)
 	if err != nil {
 		return nil, err
@@ -31,6 +33,7 @@ func NewTelegramBot(token string, users []int64) (*Bot, error) {
 	return &Bot{
 		api:             api,
 		authorizedUsers: authorizedUsers,
+		db:              db,
 	}, nil
 }
 
@@ -59,8 +62,8 @@ func (b *Bot) Start() {
 		}
 
 		if update.Message.IsCommand() {
-			b.handleCommand(update.Message)
 			log.Printf("Received command from %s (ID: %d)\n", sender.Username, sender.Id)
+			b.handleCommand(update.Message)
 			continue
 		}
 	}
@@ -103,14 +106,30 @@ func (b *Bot) sendMessage(chatID int64, text string, replyToID int) {
 // Processes incoming bot commands and routes them to appropriate functionalities.
 func (b *Bot) handleCommand(message *tgbotapi.Message) {
 	command := message.Command()
-	// args := message.CommandArguments()
+	args := message.CommandArguments()
+	userID := strconv.FormatInt(message.From.ID, 10)
+
+	log.Printf("Handling command: %s, args: %s, userID: %s", command, args, userID)
 
 	switch command {
-	case "hello":
-		b.sendMessage(message.Chat.ID, "Hello World!", message.MessageID)
+	case "start":
+		err := b.db.StartTracking(userID, args)
+		if err != nil {
+			b.sendMessage(message.Chat.ID, fmt.Sprintf("%s", err), message.MessageID)
+			return
+		}
+		b.sendMessage(message.Chat.ID, "⏲️ Timer is started.", message.MessageID)
+	case "stop":
+		_, err := b.db.StopTracking(userID)
+		if err != nil {
+			b.sendMessage(message.Chat.ID, fmt.Sprintf("%s", err), message.MessageID)
+			return
+		}
+		b.sendMessage(message.Chat.ID, "❌ Timer is stopped.", message.MessageID)
 	case "help":
 		helpText := "Available commands:\n" +
-			"/hello - Send hello message\n" +
+			"/start - Starts timer with optional note\n" +
+			"/stop - Stops timer\n" +
 			"/help - Show this help message"
 		b.sendMessage(message.Chat.ID, helpText, message.MessageID)
 	default:

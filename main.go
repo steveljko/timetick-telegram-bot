@@ -29,7 +29,12 @@ func main() {
 		log.Println("No authorized users specified.")
 	}
 
-	bot, err := NewTelegramBot(botToken, authorizedUsers)
+	db, err := NewDatabase("database.db")
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	bot, err := NewTelegramBot(botToken, authorizedUsers, db)
 	if err != nil {
 		log.Fatal("Failed to initialize bot: ", err)
 	}
