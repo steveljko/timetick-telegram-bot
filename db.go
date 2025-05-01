@@ -29,13 +29,17 @@ const (
   start_time TIMESTAMP NOT NULL,
   end_time TIMESTAMP,
   note TEXT,
-  active BOOLEAN NOT NULL DEFAULT 1
+  active BOOLEAN NOT NULL DEFAULT 1,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  synced_at TIMESTAMP DEFAULT NULL,
 	);`
 
-	createEntrySQL    = `INSERT INTO entries (user_id, start_time, note, active) VALUES (?, ?, ?, 1)`
-	getActiveEntrySQL = `SELECT id, user_id, start_time, end_time, active FROM entries WHERE user_id = ? AND active = 1 LIMIT 1`
-	updateEntrySQL    = `UPDATE entries SET end_time = ?, active = 0 WHERE id = ?`
-	hasActiveEntrySQL = `SELECT COUNT(*) FROM entries WHERE user_id = ? AND active = 1`
+	createEntrySQL           = `INSERT INTO entries (user_id, start_time, note, active) VALUES (?, ?, ?, 1)`
+	getUnsyncedEntriesSQL    = `SELECT * FROM entries WHERE synced_at IS NULL`
+	updateEntrySyncStatusSQL = `UPDATE entries SET synced_at = CURRENT_TIMESTAMP WHERE id = ?`
+	getActiveEntrySQL        = `SELECT id, user_id, start_time, end_time, active FROM entries WHERE user_id = ? AND active = 1 LIMIT 1`
+	updateEntrySQL           = `UPDATE entries SET end_time = ?, active = 0 WHERE id = ?`
+	hasActiveEntrySQL        = `SELECT COUNT(*) FROM entries WHERE user_id = ? AND active = 1`
 )
 
 func NewDatabase(dbPath string) (*Database, error) {
@@ -57,6 +61,46 @@ func (db *Database) initDB() error {
 	_, err := db.conn.Exec(createEntriesTableSQL)
 	if err != nil {
 		return fmt.Errorf("Failed to initialize database: %w", err)
+	}
+	return nil
+}
+
+// Gets list of unsynced entries
+func (db *Database) GetUnsyncedEntries() ([]Entry, error) {
+	entries, err := db.conn.Query(getUnsyncedEntriesSQL)
+	if err != nil {
+		return nil, fmt.Errorf("error querying entries: %w", err)
+	}
+	defer entries.Close()
+
+	var results []Entry
+	for entries.Next() {
+		var entry Entry
+		if err := entries.Scan(
+			&entry.ID,
+			&entry.UserID,
+			&entry.StartTime,
+			&entry.EndTime,
+			&entry.Note,
+			&entry.Active,
+		); err != nil {
+			return nil, fmt.Errorf("error scanning entry: %w", err)
+		}
+		results = append(results, entry)
+	}
+
+	if err := entries.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating entries: %w", err)
+	}
+
+	return results, nil
+}
+
+// Updates sync status for entry
+func (db *Database) UpdateEntrySyncStatus(entryID int) error {
+	_, err := db.conn.Exec(updateEntrySyncStatusSQL, entryID)
+	if err != nil {
+		return fmt.Errorf("error updating sync status for entry %d: %w", entryID, err)
 	}
 	return nil
 }
