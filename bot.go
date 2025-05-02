@@ -118,7 +118,7 @@ func (b *Bot) handleCommand(message *tgbotapi.Message) {
 			b.sendMessage(message.Chat.ID, fmt.Sprintf("%s", err), message.MessageID)
 			return
 		}
-		b.sendMessage(message.Chat.ID, "⏲️ Timer is started.", message.MessageID)
+		b.sendMessage(message.Chat.ID, "⏲️ Timer is started.\nUse /stop for stopping timer.", message.MessageID)
 	case "stop":
 		_, err := b.db.StopTracking(userID)
 		if err != nil {

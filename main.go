@@ -5,6 +5,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 type App struct {
@@ -41,7 +42,23 @@ func main() {
 
 	app := NewApp(bot)
 
-	app.bot.Start()
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	go func() {
+		defer wg.Done()
+		app.bot.Start()
+	}()
+
+	go func() {
+		defer wg.Done()
+		err := StartAPIServer(app, db, 3000)
+		if err != nil {
+			log.Fatal(err)
+		}
+	}()
+
+	wg.Wait()
 }
 
 // Converts comma-separated string into slice of integers.
