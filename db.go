@@ -9,12 +9,13 @@ import (
 )
 
 type Entry struct {
-	ID        int64
-	UserID    string
-	StartTime time.Time
-	EndTime   sql.NullTime
-	Note      string
-	Active    bool
+	ID         int64
+	UserID     string
+	StartTime  time.Time
+	EndTime    sql.NullTime
+	Note       string
+	Active     bool
+	ImportedAt sql.NullTime
 }
 
 type Database struct {
@@ -31,15 +32,16 @@ const (
   note TEXT,
   active BOOLEAN NOT NULL DEFAULT 1,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  synced_at TIMESTAMP DEFAULT NULL,
-	);`
+  imported_at TIMESTAMP DEFAULT NULL
+	)`
 
-	createEntrySQL           = `INSERT INTO entries (user_id, start_time, note, active) VALUES (?, ?, ?, 1)`
-	getUnsyncedEntriesSQL    = `SELECT * FROM entries WHERE synced_at IS NULL`
-	updateEntrySyncStatusSQL = `UPDATE entries SET synced_at = CURRENT_TIMESTAMP WHERE id = ?`
-	getActiveEntrySQL        = `SELECT id, user_id, start_time, end_time, active FROM entries WHERE user_id = ? AND active = 1 LIMIT 1`
-	updateEntrySQL           = `UPDATE entries SET end_time = ?, active = 0 WHERE id = ?`
-	hasActiveEntrySQL        = `SELECT COUNT(*) FROM entries WHERE user_id = ? AND active = 1`
+	createEntrySQL             = `INSERT INTO entries (user_id, start_time, note, active) VALUES (?, ?, ?, 1)`
+	getUnimportedEntriesSQL    = `SELECT id, user_id, start_time, end_time, note, active, imported_at FROM entries WHERE imported_at IS NULL`
+	updateEntryImportStatusSQL = `UPDATE entries SET imported_at = CURRENT_TIMESTAMP WHERE id = ?`
+	checkEntrySQL              = `SELECT COUNT(*), CASE WHEN imported_at IS NULL THEN 1 ELSE 0 END FROM entries WHERE id = ?`
+	getActiveEntrySQL          = `SELECT id, user_id, start_time, end_time, active FROM entries WHERE user_id = ? AND active = 1 LIMIT 1`
+	updateEntrySQL             = `UPDATE entries SET end_time = ?, active = 0 WHERE id = ?`
+	hasActiveEntrySQL          = `SELECT COUNT(*) FROM entries WHERE user_id = ? AND active = 1`
 )
 
 func NewDatabase(dbPath string) (*Database, error) {
@@ -65,11 +67,11 @@ func (db *Database) initDB() error {
 	return nil
 }
 
-// Gets list of unsynced entries
-func (db *Database) GetUnsyncedEntries() ([]Entry, error) {
-	entries, err := db.conn.Query(getUnsyncedEntriesSQL)
+// Gets list of unimported entries
+func (db *Database) GetUnimportedEntries() ([]Entry, error) {
+	entries, err := db.conn.Query(getUnimportedEntriesSQL)
 	if err != nil {
-		return nil, fmt.Errorf("error querying entries: %w", err)
+		return nil, fmt.Errorf("Error querying entries: %w", err)
 	}
 	defer entries.Close()
 
@@ -83,26 +85,38 @@ func (db *Database) GetUnsyncedEntries() ([]Entry, error) {
 			&entry.EndTime,
 			&entry.Note,
 			&entry.Active,
+			&entry.ImportedAt,
 		); err != nil {
-			return nil, fmt.Errorf("error scanning entry: %w", err)
+			return nil, fmt.Errorf("Error scanning entry: %w", err)
 		}
 		results = append(results, entry)
 	}
 
 	if err := entries.Err(); err != nil {
-		return nil, fmt.Errorf("error iterating entries: %w", err)
+		return nil, fmt.Errorf("Error iterating entries: %w", err)
 	}
 
 	return results, nil
 }
 
-// Updates sync status for entry
-func (db *Database) UpdateEntrySyncStatus(entryID int) error {
-	_, err := db.conn.Exec(updateEntrySyncStatusSQL, entryID)
+// Updates imported status for entry
+func (db *Database) UpdateEntryImportStatus(entryID int) error {
+	_, err := db.conn.Exec(updateEntryImportStatusSQL, entryID)
 	if err != nil {
-		return fmt.Errorf("error updating sync status for entry %d: %w", entryID, err)
+		return fmt.Errorf("Error updating import status for entry %d: %w", entryID, err)
 	}
 	return nil
+}
+
+// Checks if entry exists and their import status
+func (db *Database) CheckEntry(entryID int) (exists bool, isImported bool, err error) {
+	var count, unimported int
+	err = db.conn.QueryRow(checkEntrySQL, entryID).Scan(&count, &unimported)
+	if err != nil {
+		return false, false, fmt.Errorf("Error checking entry %d: %w", entryID, err)
+	}
+
+	return count > 0, unimported == 1, nil
 }
 
 // Starts entry tracking for user
@@ -141,7 +155,7 @@ func (db *Database) StopTracking(userID string) (Entry, error) {
 	endTime := time.Now()
 	_, err = db.conn.Exec(updateEntrySQL, endTime, entry.ID)
 	if err != nil {
-		return Entry{}, fmt.Errorf("failed to end entry: %w", err)
+		return Entry{}, fmt.Errorf("Failed to end entry: %w", err)
 	}
 
 	// Update the entry object
@@ -175,7 +189,7 @@ func (db *Database) getActiveEntry(userID string) (Entry, bool, error) {
 		return Entry{}, false, nil
 	}
 	if err != nil {
-		return Entry{}, false, fmt.Errorf("failed to get active entry: %w", err)
+		return Entry{}, false, fmt.Errorf("Failed to get active entry: %w", err)
 	}
 
 	entry.EndTime = endTime
