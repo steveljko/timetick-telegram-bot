@@ -9,13 +9,13 @@ import (
 )
 
 type Entry struct {
-	ID         int64
-	UserID     string
-	StartTime  time.Time
-	EndTime    sql.NullTime
-	Note       string
-	Active     bool
-	ImportedAt sql.NullTime
+	ID         int64        `json:"id"`
+	UserID     string       `json:"user_id"`
+	StartTime  time.Time    `json:"start_time"`
+	EndTime    sql.NullTime `json:"end_time"`
+	Note       string       `json:"note"`
+	Active     bool         `json:"active"`
+	ImportedAt sql.NullTime `json:"imported_at"`
 }
 
 type Database struct {
