@@ -18,6 +18,14 @@ type Entry struct {
 	ImportedAt sql.NullTime `json:"imported_at"`
 }
 
+type ApiToken struct {
+	ID        int
+	TokenHash string
+	CreatedAt time.Time
+	LastUsed  time.Time
+	IsActive  bool
+}
+
 type Database struct {
 	conn *sql.DB
 }
@@ -35,6 +43,15 @@ const (
   imported_at TIMESTAMP DEFAULT NULL
 	)`
 
+	createApiTokensTableSQL = `
+  CREATE TABLE IF NOT EXISTS api_tokens (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  token_hash TEXT NOT NULL UNIQUE,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  last_used TIMESTAMP,
+  is_active BOOLEAN NOT NULL DEFAULT 1
+  )`
+
 	createEntrySQL             = `INSERT INTO entries (user_id, start_time, note, active) VALUES (?, ?, ?, 1)`
 	getUnimportedEntriesSQL    = `SELECT id, user_id, start_time, end_time, note, active, imported_at FROM entries WHERE imported_at IS NULL`
 	updateEntryImportStatusSQL = `UPDATE entries SET imported_at = CURRENT_TIMESTAMP WHERE id = ?`
@@ -42,6 +59,8 @@ const (
 	getActiveEntrySQL          = `SELECT id, user_id, start_time, end_time, active FROM entries WHERE user_id = ? AND active = 1 LIMIT 1`
 	updateEntrySQL             = `UPDATE entries SET end_time = ?, active = 0 WHERE id = ?`
 	hasActiveEntrySQL          = `SELECT COUNT(*) FROM entries WHERE user_id = ? AND active = 1`
+
+	createApiTokenSQL = `INSERT INTO api_tokens (token_hash, created_at, is_active) VALUES (?, ?, ?)`
 )
 
 func NewDatabase(dbPath string) (*Database, error) {
@@ -61,9 +80,12 @@ func NewDatabase(dbPath string) (*Database, error) {
 
 func (db *Database) initDB() error {
 	_, err := db.conn.Exec(createEntriesTableSQL)
+	_, err = db.conn.Exec(createApiTokensTableSQL)
+
 	if err != nil {
 		return fmt.Errorf("Failed to initialize database: %w", err)
 	}
+
 	return nil
 }
 
@@ -194,4 +216,23 @@ func (db *Database) getActiveEntry(userID string) (Entry, bool, error) {
 
 	entry.EndTime = endTime
 	return entry, true, nil
+}
+
+func (db *Database) CreateApiToken(token string) error {
+	tokenHash := Hash(token)
+
+	now := time.Now()
+	apiToken := &ApiToken{
+		TokenHash: tokenHash,
+		CreatedAt: now,
+		LastUsed:  time.Time{},
+		IsActive:  true,
+	}
+
+	_, err := db.conn.Exec(createApiTokenSQL, apiToken.TokenHash, apiToken.CreatedAt, apiToken.IsActive)
+	if err != nil {
+		return fmt.Errorf("failed to insert token: %w", err)
+	}
+
+	return nil
 }

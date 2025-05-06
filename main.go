@@ -1,24 +1,38 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"os"
-	"strconv"
-	"strings"
 	"sync"
 )
 
 type App struct {
+	db  *Database
 	bot *Bot
 }
 
-func NewApp(bot *Bot) *App {
+func NewApp(db *Database, bot *Bot) *App {
 	return &App{
+		db:  db,
 		bot: bot,
 	}
 }
 
 func main() {
+	args := os.Args
+	app := createApp()
+
+	if len(args) > 1 {
+		command := args[1]
+		handleCommand(app, command)
+		return
+	}
+
+	app.Start()
+}
+
+func createApp() *App {
 	botToken := os.Getenv("TELEGRAM_BOT_TOKEN")
 	if botToken == "" {
 		log.Fatal("TELEGRAM_BOT_TOKEN environment variable is required")
@@ -40,19 +54,21 @@ func main() {
 		log.Fatal("Failed to initialize bot: ", err)
 	}
 
-	app := NewApp(bot)
+	return NewApp(db, bot)
+}
 
+func (a *App) Start() {
 	var wg sync.WaitGroup
 	wg.Add(2)
 
 	go func() {
 		defer wg.Done()
-		app.bot.Start()
+		a.bot.Start()
 	}()
 
 	go func() {
 		defer wg.Done()
-		err := StartAPIServer(app, db, 3000)
+		err := StartAPIServer(a, a.db, 3000)
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -61,28 +77,27 @@ func main() {
 	wg.Wait()
 }
 
-// Converts comma-separated string into slice of integers.
-//
-// Example:
-//
-//	Input: "123,456,789"
-//	Output: []int64{123, 456, 789}
-func convertStringToIntArray(arrString string) []int64 {
-	var intArr []int64
-
-	stringSlice := strings.Split(arrString, ",")
-
-	for _, numString := range stringSlice {
-		trimmed := strings.TrimSpace(numString) // remove trailing whitespace
-
-		intValue, err := strconv.ParseInt(trimmed, 10, 64)
-		if err != nil {
-			log.Printf("Skipping invalid integer: %q - %v", trimmed, err)
-			continue
-		}
-
-		intArr = append(intArr, intValue)
+func (a *App) GenerateAPIToken() {
+	token, err := GenerateToken()
+	if err != nil {
+		log.Fatal("Failed to generate token: ", err)
 	}
 
-	return intArr
+	err = a.db.CreateApiToken(token)
+	if err != nil {
+		fmt.Println(err)
+	}
+
+	fmt.Println("API Token generated successfully!")
+	fmt.Println(token)
+	fmt.Println("IMPORTANT: Save this token now. You won't be able to see it again!")
+}
+
+func handleCommand(app *App, command string) {
+	switch command {
+	case "start":
+		app.Start()
+	case "gen-api-token":
+		app.GenerateAPIToken()
+	}
 }
