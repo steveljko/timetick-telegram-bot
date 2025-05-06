@@ -1,10 +1,12 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 )
 
 type APIHandler struct {
@@ -19,12 +21,56 @@ func NewAPIHandler(app *App, db *Database) *APIHandler {
 	}
 }
 
+type contextKey string
+
+const (
+	TokenContextKey  contextKey = "token"
+	InvalidTokenCode ErrorCode  = "INVALID_TOKEN"
+	MissingTokenCode ErrorCode  = "MISSING_TOKEN"
+)
+
+func AuthMiddleware(db *Database, next http.HandlerFunc) http.HandlerFunc {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// extract token from Authorization header
+		authHeader := r.Header.Get("Authorization")
+		if authHeader == "" {
+			RespondWithError(w, http.StatusUnauthorized, MissingTokenCode, "Authentication token required")
+			return
+		}
+
+		// check token format
+		parts := strings.SplitN(authHeader, " ", 2)
+		if len(parts) != 2 || strings.ToLower(parts[0]) != "bearer" {
+			RespondWithError(w, http.StatusUnauthorized, InvalidTokenCode, "Invalid Authorization header format")
+			return
+		}
+
+		token := parts[1]
+		tokenHash := Hash(token)
+
+		// verify token in database and update last used at
+		apiToken, err := db.GetApiTokenByHash(tokenHash)
+		if err != nil || !apiToken.IsActive {
+			RespondWithError(w, http.StatusUnauthorized, InvalidTokenCode, "Invalid or inactive API token")
+			return
+		}
+
+		if err := db.UpdateApiTokenLastUsed(apiToken.ID); err != nil {
+			log.Printf("Failed to update token last_used: %v", err)
+		}
+
+		// add token to request context
+		ctx := context.WithValue(r.Context(), TokenContextKey, apiToken)
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
 func SetupRoutes(app *App, db *Database) http.Handler {
 	handler := NewAPIHandler(app, db)
 	mux := http.NewServeMux()
 
-	mux.HandleFunc("GET /api/entries", handler.getUnimportedEntries)
-	mux.HandleFunc("POST /api/entries/mark", handler.markEntriesAsImported)
+	mux.HandleFunc("GET /api/entries", AuthMiddleware(db, handler.getUnimportedEntries))
+	mux.HandleFunc("POST /api/entries/mark", AuthMiddleware(db, handler.markEntriesAsImported))
 
 	return mux
 }

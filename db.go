@@ -22,7 +22,7 @@ type ApiToken struct {
 	ID        int
 	TokenHash string
 	CreatedAt time.Time
-	LastUsed  time.Time
+	LastUsed  sql.NullTime
 	IsActive  bool
 }
 
@@ -60,7 +60,9 @@ const (
 	updateEntrySQL             = `UPDATE entries SET end_time = ?, active = 0 WHERE id = ?`
 	hasActiveEntrySQL          = `SELECT COUNT(*) FROM entries WHERE user_id = ? AND active = 1`
 
-	createApiTokenSQL = `INSERT INTO api_tokens (token_hash, created_at, is_active) VALUES (?, ?, ?)`
+	createApiTokenSQL         = `INSERT INTO api_tokens (token_hash, created_at, is_active) VALUES (?, ?, ?)`
+	getApiTokenByTokenHashSQL = `SELECT id, token_hash, created_at, last_used, is_active FROM api_tokens WHERE token_hash = ?`
+	updateApiTokenLastUsed    = `UPDATE api_tokens SET last_used = ? WHERE id = ?`
 )
 
 func NewDatabase(dbPath string) (*Database, error) {
@@ -218,6 +220,7 @@ func (db *Database) getActiveEntry(userID string) (Entry, bool, error) {
 	return entry, true, nil
 }
 
+// Creates API token
 func (db *Database) CreateApiToken(token string) error {
 	tokenHash := Hash(token)
 
@@ -225,7 +228,7 @@ func (db *Database) CreateApiToken(token string) error {
 	apiToken := &ApiToken{
 		TokenHash: tokenHash,
 		CreatedAt: now,
-		LastUsed:  time.Time{},
+		LastUsed:  sql.NullTime{},
 		IsActive:  true,
 	}
 
@@ -234,5 +237,27 @@ func (db *Database) CreateApiToken(token string) error {
 		return fmt.Errorf("failed to insert token: %w", err)
 	}
 
+	return nil
+}
+
+// Gets api token by using its hash
+func (db *Database) GetApiTokenByHash(tokenHash string) (*ApiToken, error) {
+	var token ApiToken
+
+	err := db.conn.QueryRow(getApiTokenByTokenHashSQL, tokenHash).Scan(&token.ID, &token.TokenHash, &token.CreatedAt, &token.LastUsed, &token.IsActive)
+	if err != nil {
+		return nil, fmt.Errorf("token not found: %w", err)
+	}
+
+	return &token, nil
+}
+
+// Updates api token last used at property
+func (db *Database) UpdateApiTokenLastUsed(tokenID int) error {
+	now := time.Now()
+	_, err := db.conn.Exec(updateApiTokenLastUsed, now, tokenID)
+	if err != nil {
+		return fmt.Errorf("failed to update token last used: %w", err)
+	}
 	return nil
 }
