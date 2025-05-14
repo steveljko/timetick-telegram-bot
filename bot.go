@@ -64,24 +64,8 @@ func (b *Bot) Start() {
 		}
 
 		// check if user has active request for starting a timer without note
-		if b.pendingNotes[sender.Id] {
-			note := update.Message.Text
-			if note == "x" {
-				note = ""
-			}
-
-			err := b.db.StartTracking(strconv.FormatInt(sender.Id, 10), note)
-			if err != nil {
-				b.sendMessage(update.Message.Chat.ID, fmt.Sprintf("%s", err), update.Message.MessageID)
-			} else {
-				if note == "" {
-					b.sendMessage(update.Message.Chat.ID, "⏲️ Timer is started.\nUse /stop for stopping timer.", update.Message.MessageID)
-				} else {
-					b.sendMessage(update.Message.Chat.ID, "⏲️ Timer is started with note: "+note+"\nUse /stop for stopping timer.", update.Message.MessageID)
-				}
-			}
-
-			delete(b.pendingNotes, sender.Id)
+		if b.hasPendingNote(sender.Id) {
+			b.processPendingNote(update.Message.Chat.ID, update.Message.MessageID, update.Message.Text, sender.Id)
 			continue
 		}
 
@@ -91,6 +75,36 @@ func (b *Bot) Start() {
 			continue
 		}
 	}
+}
+
+// Check if user has a pending note request
+func (b *Bot) hasPendingNote(userId int64) bool {
+	_, exists := b.pendingNotes[userId]
+	return exists
+}
+
+// Process pending note request
+func (b *Bot) processPendingNote(chatId int64, messageId int, note string, userId int64) {
+	// convert "x" to empty string
+	if note == "x" {
+		note = ""
+	}
+
+	err := b.db.StartTracking(strconv.FormatInt(userId, 10), note)
+	if err != nil {
+		b.sendMessage(chatId, fmt.Sprintf("%s", err), messageId)
+		delete(b.pendingNotes, userId)
+		return
+	}
+
+	message := "⏲️ Timer is started."
+	if note != "" {
+		message += " Note is: " + note
+	}
+	message += "\nUse /stop for stopping timer."
+
+	b.sendMessage(chatId, message, messageId)
+	delete(b.pendingNotes, userId)
 }
 
 // Checks if user has permission to interact with the bot.
